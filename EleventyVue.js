@@ -1,14 +1,12 @@
 const path = require("path");
 const fastglob = require("fast-glob");
 const lodashMerge = require("lodash.merge");
-
 const rollup = require("rollup");
 const rollupPluginVue = require("rollup-plugin-vue");
 const rollupPluginCssOnly = require("rollup-plugin-css-only");
-
-const Vue = require("vue");
-const vueServerRenderer = require("vue-server-renderer");
-const renderer = vueServerRenderer.createRenderer();
+const { createRouter, createMemoryHistory } = require('vue-router');
+const { createSSRApp } = require('vue');
+const { renderToString } = require('@vue/server-renderer');
 
 class EleventyVue {
   constructor(cacheDirectory) {
@@ -17,10 +15,12 @@ class EleventyVue {
 
     this.vueFileToCSSMap = {};
     this.vueFileToJavaScriptFilenameMap = {};
+    this.routes = [];
 
     this.rollupBundleOptions = {
       format: "cjs", // because we’re consuming these in node. See also "esm"
       exports: "default",
+      globals: { vue: 'Vue' },
       // dir: this.cacheDir
     };
 
@@ -45,10 +45,12 @@ class EleventyVue {
 
   getRollupPluginVueOptions() {
     return lodashMerge({
-      css: false,
-      template: {
-        optimizeSSR: true
-      }
+      target: 'node'
+      // Deprecated
+      // css: false,
+      // template: {
+      //   optimizeSSR: true
+      // }
       // compilerOptions: {} // https://github.com/vuejs/vue/tree/dev/packages/vue-template-compiler#options
     }, this.rollupPluginVueOptions);
   }
@@ -99,6 +101,7 @@ class EleventyVue {
 
     let bundle = await rollup.rollup({
       input: input,
+      external: ['vue'],
       plugins: [
         rollupPluginCssOnly({
           output: (styles, styleNodes) => {
@@ -114,22 +117,79 @@ class EleventyVue {
     return bundle;
   }
 
-  // async generateFromBundle(bundle) {
-  //   let { output } = await bundle.generate(this.rollupBundleOptions);
-
-  //   return output;
-  // }
-
   async write(bundle) {
     if(!bundle) {
       throw new Error("Eleventy Vue Plugin: write(bundle) needs a bundle argument.");
     }
-
-    let { output } = await bundle.write(this.rollupBundleOptions);
+    var { output } = await bundle.write(this.rollupBundleOptions);
 
     output = output.filter(entry => !!entry.facadeModuleId);
 
     return output;
+  }
+
+  async writeRoutesBundle(bundle, chunkNames=new Map) {
+    var { output } = await bundle.write({
+      ...this.rollupBundleOptions, 
+      manualChunks: (id, cordo) => {
+        const match = /([^\/]*\.vue)$/.exec(id);
+
+        if (!match) return null;
+        let chunkName = match[0];
+        let ii = 0;
+        while (chunkNames.has(chunkName)) {
+          chunkName = `${match[0]}-${++ii}`;
+        }
+        chunkNames.set(chunkName, id);
+
+        return chunkName;
+      },
+      chunkFileNames: (info) => {
+        if (chunkNames.has(info.name)) {
+          return "[name].js"
+        }
+        return "[name]-[hash].js"
+      }
+    });
+
+    output = output.filter(entry => !!entry.facadeModuleId);
+
+    return output;
+  }
+
+  createVueComponentsFromMap(map) {
+    this.componentsWriteCount = 0;
+
+    map.forEach((sourceFile, chunkName) => {
+      this.createVueComponent(sourceFile, `${chunkName}.js`);
+    });
+  }
+
+  createVueComponent(fullVuePath, jsFilename) {
+    let inputPath = this.getLocalVueFilePath(fullVuePath);
+
+    this.addVueToJavaScriptMapping(inputPath, jsFilename);
+
+    let css = this.getCSSForComponent(inputPath);
+
+    if(css && this.cssManager) {
+      this.cssManager.addComponentCode(jsFilename, css);
+    }
+
+    //@TODO nested component styles are currently missing. Likely, we need to establish the relationship with the cssManager as the commented code below
+
+    let isFullTemplateFile = !this.isIncludeFile(fullVuePath);
+    if(isFullTemplateFile) {
+      if(this.cssManager) {
+        // If you import it, it will roll up the imported CSS in the CSS manager
+
+        // @TODO restore this bit
+        // for(let importFilename of entry.imports) {
+        //   this.cssManager.addComponentRelationship(jsFilename, importFilename);
+        // }
+      }
+    }
+    this.componentsWriteCount++;
   }
 
   // output is returned from .write()
@@ -140,6 +200,7 @@ class EleventyVue {
 
       let inputPath = this.getLocalVueFilePath(fullVuePath);
       let jsFilename = entry.fileName;
+
       this.addVueToJavaScriptMapping(inputPath, jsFilename);
 
       let css = this.getCSSForComponent(inputPath);
@@ -161,18 +222,18 @@ class EleventyVue {
     }
   }
 
-  getLocalVueFilePath(fullPath) {
+  getLocalVueFilePath(fullPath, extension=".vue") {
     let filePath = fullPath;
     if(fullPath.startsWith(this.workingDir)) {
       filePath = `.${fullPath.substr(this.workingDir.length)}`;
     }
-    let extension = ".vue";
     return filePath.substr(0, filePath.lastIndexOf(extension) + extension.length);
   }
 
   /* CSS */
   addCSS(fullVuePath, cssText) {
     let localVuePath = this.getLocalVueFilePath(fullVuePath);
+
     if(!this.vueFileToCSSMap[localVuePath]) {
       this.vueFileToCSSMap[localVuePath] = [];
     }
@@ -201,38 +262,75 @@ class EleventyVue {
 
   getComponent(localVuePath) {
     let fullComponentPath = this.getFullJavaScriptComponentFilePath(localVuePath);
-    return require(fullComponentPath);
+
+    const result = require(fullComponentPath);
+
+    //When the component is a chunk, it is under the 'script' export rather than the default export.
+
+    return result.script || result;
   }
 
-  async renderComponent(vueComponent, data, mixin = {}) {
-    Vue.mixin(mixin);
+  saveRoutesMapping(output) {
+    for(let entry of output) {
+      let jsFilename = entry.fileName;
+      let inputPath = path.join(this.workingDir, this.cacheDir, jsFilename);
+      this.routes = require(inputPath);
+    }
+  }
+
+  async renderComponent(vueComponent, data, mixin = {}, wrapperComponent) {
 
     // We don’t use a local mixin for this because it’s global to all components
     // We don’t use a global mixin for this because modifies the Vue object and
     // leaks into other templates (reports wrong page.url!)
-    if(!("page" in Vue.prototype)) {
-      Object.defineProperty(Vue.prototype, "page", {
+    
+    // Full data cascade is available to the root template component
+    // if(!vueComponent.mixins) {
+    //   vueComponent.mixins = [];
+    // }
+
+    // This is how 11ty data was being previously made available to components. Currently trying inject/provide instead, but we may want this back.
+
+    // vueComponent.mixins.push({
+    //   data: function() {
+    //     return data;
+    //   },
+    // });
+
+    //@TODO currently, we don't have a great way of modeling deeply nested router views / child routes that will work with 11ty.
+    const app = createSSRApp(wrapperComponent || vueComponent);
+    const router = createRouter({ routes: this.routes, history: createMemoryHistory() });
+
+    app.use(router);
+    router.push(data.page.url)
+
+    await router.isReady();
+
+    app.provide('eleventyData', data);
+    app.mixin(mixin);
+
+    if(!("page" in app.config.globalProperties)) {
+      Object.defineProperty(app.config.globalProperties, "page", {
         get () {
           // https://vuejs.org/v2/api/#vm-root
           return this.$root.$options.data().page;
         }
-      });
+      })
     }
+    const html = await renderToString(app);
 
-    // Full data cascade is available to the root template component
-    if(!vueComponent.mixins) {
-      vueComponent.mixins = [];
-    }
-    vueComponent.mixins.push({
-      data: function() {
-        return data;
-      },
-    });
-
-    const app = new Vue(vueComponent);
-
-    // returns a promise
-    return renderer.renderToString(app);
+    //@TODO write data into separate JSON files instead, use runtime plugin to fetch in routing hook 
+    //@TODO split data into separate JSON files for global vs page-specific data. Then we can fetch only the data that changes on routing events
+    return `${html}<script>window.__11TY_INITIAL_STATE__=${JSON.stringify(data, function( key, value) {
+      switch (key) {
+        case 'pkg':
+        case 'vue':
+        case 'collections':
+          return null;
+        default:
+          return value;
+      }
+    })}</script>`;
   }
 }
 

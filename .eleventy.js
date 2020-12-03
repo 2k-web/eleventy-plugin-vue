@@ -1,10 +1,9 @@
 const path = require("path");
 const lodashMerge = require("lodash.merge");
-
+const { createRouter, createMemoryHistory } = require('vue-router');
 const { InlineCodeManager } = require("@11ty/eleventy-assets");
 
 const EleventyVue = require("./EleventyVue");
-
 const pkg = require("./package.json");
 
 const globalOptions = {
@@ -87,14 +86,29 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
       } else {
         eleventyVue.clearRequireCache(changedFilesOnWatch);
 
-        let files = changedFilesOnWatch;
-        if(!files || !files.length) {
-          files = await eleventyVue.findFiles();
-        }
-        let bundle = await eleventyVue.getBundle(files);
-        let output = await eleventyVue.write(bundle);
-  
-        eleventyVue.createVueComponents(output);
+        if (!options.routesPath) {
+          let files = changedFilesOnWatch;
+          if(!files || !files.length) {
+            files = await eleventyVue.findFiles();
+          }
+          var bundle = await eleventyVue.getBundle(files);
+
+          var output = await eleventyVue.write(bundle);
+    
+          eleventyVue.createVueComponents(output);
+        } else {
+          routesBundle = await eleventyVue.getBundle(options.routesPath);
+          let chunkNames = new Map;
+          output = await eleventyVue.writeRoutesBundle(routesBundle, chunkNames);
+
+          eleventyVue.createVueComponentsFromMap(chunkNames);
+          eleventyVue.saveRoutesMapping(output);
+
+          //write app component
+          let appBundle = await eleventyVue.getBundle(options.appPath);
+          output = await eleventyVue.write(appBundle);
+          eleventyVue.createVueComponents(output);
+        }        
       }
     },
     compile: function(str, inputPath) {
@@ -103,14 +117,33 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
         // since `read: false` is set 11ty doesn't read file contents
         // so if str has a value, it's a permalink (which can be a string or a function)
         // currently Vue template syntax in permalink string is not supported.
-        if (str) {
-          if(typeof str === "function") {
-            return await str(data);
+        const processVueRoute = (routeObj) => {
+          let vueComponent = eleventyVue.getComponent(data.page.inputPath);
+          const route = eleventyVue.routes.find(route => route.component === vueComponent);
+          if (!route.name) {
+            throw new Error(`Routes must have a name`);
           }
-          return str;
+          const router = createRouter({ routes: eleventyVue.routes, history: createMemoryHistory() });
+          const resolvedRoute = router.resolve({ ...routeObj, params: { ...routeObj.params }, name: route.name });
+
+          return resolvedRoute.href.replace(/\/?$/, '/index.html');
         }
 
+        if (str) {
+          if(typeof str === "function") {
+            str = await str(data);
+          }
+          
+          if (typeof str === 'object') {
+            //vue route object
+            return processVueRoute(str);
+          }
+
+          return str;
+        }
+        
         let vueComponent = eleventyVue.getComponent(data.page.inputPath);
+        let appComponent = eleventyVue.getComponent(options.appPath);
 
         let componentName = eleventyVue.getJavaScriptComponentFile(data.page.inputPath);
         cssManager.addComponentForUrl(componentName, data.page.url);
@@ -119,7 +152,7 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
           methods: this.config.javascriptFunctions,
         };
 
-        return eleventyVue.renderComponent(vueComponent, data, vueMixin);
+        return eleventyVue.renderComponent(vueComponent, data, vueMixin, appComponent);
       };
     }
   });

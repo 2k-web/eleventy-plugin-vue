@@ -6,6 +6,36 @@ const { InlineCodeManager } = require("@11ty/eleventy-assets");
 const EleventyVue = require("./EleventyVue");
 const pkg = require("./package.json");
 
+function getPermalink(permalink, data) {
+  if (!permalink) {
+    return null;
+  }
+  if (typeof permalink === 'function') {
+    return getPermalink(permalink(data));
+  }
+  return permalink;
+}
+
+function getPathToComponent(routes, component, path=[]) {
+  return routes.reduce((acc, route) => {
+    if (acc.length) {
+      return acc;
+    }
+
+    if (route.component === component) {
+      return [...path, route];
+    }
+
+    if (route.children) {
+      const result = getPathToComponent(route.children, component, path);
+      if (result.length) {
+        return [...path, route, ...result]
+      }
+    }
+    return acc;
+  }, path);
+}
+
 const globalOptions = {
   cacheDirectory: ".cache/vue/",
   // See https://rollup-plugin-vue.vuejs.org/options.html
@@ -73,7 +103,47 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
     read: false, // We use rollup to read the files
     getData: true,
     getInstanceFromInputPath: function(inputPath) {
-      return eleventyVue.getComponent(inputPath);
+
+      function mergeParentPagination(routes, component, path=[]) {
+        const pathToComponent = getPathToComponent(routes, component);
+
+        if (pathToComponent.length > 1) {
+          return {
+            ...component,
+            data: function() {
+              const origData = component.data();
+
+              return {
+                ...origData,
+                permalink: function(data) {
+                  return pathToComponent.reduce((acc, curr) => {
+                    const {permalink} = curr.component.data();
+                    const obj = getPermalink(permalink, data);
+                    if (obj && typeof obj === 'object' && obj.params && acc && typeof acc ==='object' && acc.params) {
+                      return {
+                        ...obj,
+                        params: {
+                          ...acc.params,
+                          ...obj.params
+                        }
+                      }
+                    }
+                    return obj;
+                  }, {params: {}})
+                },
+                pagination: pathToComponent.reduce((acc, item) => {
+                  return acc.concat(item.component.data().pagination)
+                }, [])
+              }
+            }
+          }
+        }
+        return component;
+      }
+
+      const component = eleventyVue.getComponent(inputPath);
+
+      return mergeParentPagination(eleventyVue.routes, component);
     },
     init: async function() {
       eleventyVue.setInputDir(this.config.inputDir);
@@ -100,7 +170,6 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
           routesBundle = await eleventyVue.getBundle(options.routesPath);
           let chunkNames = new Map;
           output = await eleventyVue.writeRoutesBundle(routesBundle, chunkNames);
-
           eleventyVue.createVueComponentsFromMap(chunkNames);
           eleventyVue.saveRoutesMapping(output);
 
@@ -119,7 +188,13 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
         // currently Vue template syntax in permalink string is not supported.
         const processVueRoute = (routeObj) => {
           let vueComponent = eleventyVue.getComponent(data.page.inputPath);
-          const route = eleventyVue.routes.find(route => route.component === vueComponent);
+          const routes = getPathToComponent(eleventyVue.routes, vueComponent);
+
+          if (routes.length < 1) {
+            throw new Error(`Permalink is referencing a route that doesn't exist: ${JSON.stringify(routeObj)}`)
+          }
+          const route = routes[routes.length - 1];
+
           if (!route.name) {
             throw new Error(`Routes must have a name`);
           }
@@ -143,7 +218,7 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
         }
         
         let vueComponent = eleventyVue.getComponent(data.page.inputPath);
-        let appComponent = eleventyVue.getComponent(options.appPath);
+        let rootComponent = eleventyVue.getComponent(options.appPath);
 
         let componentName = eleventyVue.getJavaScriptComponentFile(data.page.inputPath);
         cssManager.addComponentForUrl(componentName, data.page.url);
@@ -152,7 +227,7 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
           methods: this.config.javascriptFunctions,
         };
 
-        return eleventyVue.renderComponent(vueComponent, data, vueMixin, appComponent);
+        return eleventyVue.renderComponent(vueComponent, data, vueMixin, rootComponent);
       };
     }
   });

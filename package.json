@@ -33,7 +33,7 @@
   },
   "homepage": "https://github.com/11ty/eleventy-plugin-vue#readme",
   "peerDependencies": {
-    "@11ty/eleventy": ">=0.11.0"
+    "@11ty/eleventy": "file:../../../.nvm/versions/node/v15.2.1/lib/node_modules/@11ty/eleventy"
   },
   "ava": {
     "failFast": false,
@@ -48,6 +48,7 @@
     "@11ty/eleventy-assets": "1.0.4",
     "@vue/compiler-sfc": "^3.0.3",
     "@vue/server-renderer": "file:../../../.nvm/versions/node/v15.2.1/lib/node_modules/@vue/server-renderer",
+    "eleventy": "file:../../../.nvm/versions/node/v15.2.1/lib/node_modules/eleventy",
     "fast-glob": "^3.2.4",
     "lodash.merge": "^4.6.2",
     "rollup": "^2.32.1",

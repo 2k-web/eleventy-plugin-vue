@@ -7,6 +7,7 @@ const rollupPluginCssOnly = require("rollup-plugin-css-only");
 const { createRouter, createMemoryHistory } = require('vue-router');
 const { createSSRApp } = require('vue');
 const { renderToString } = require('@vue/server-renderer');
+const { InlineCodeManager } = require("@11ty/eleventy-assets");
 
 class EleventyVue {
   constructor(cacheDirectory) {
@@ -132,16 +133,16 @@ class EleventyVue {
     var { output } = await bundle.write({
       ...this.rollupBundleOptions, 
       manualChunks: (id, cordo) => {
-        const match = /([^\/]*\.vue)$/.exec(id);
+        
+        const match = /([^\/]*)\.vue$/.exec(id);
 
         if (!match) return null;
-        let chunkName = match[0];
+        let chunkName = match[1];
         let ii = 0;
         while (chunkNames.has(chunkName)) {
-          chunkName = `${match[0]}-${++ii}`;
+          chunkName = `${match[1]}-${++ii}`;
         }
         chunkNames.set(chunkName, id);
-
         return chunkName;
       },
       chunkFileNames: (info) => {
@@ -270,12 +271,18 @@ class EleventyVue {
     return result.script || result;
   }
 
-  saveRoutesMapping(output) {
-    for(let entry of output) {
-      let jsFilename = entry.fileName;
-      let inputPath = path.join(this.workingDir, this.cacheDir, jsFilename);
-      this.routes = require(inputPath);
+  async saveRoutesMapping(output) {
+    const entry = output[0];
+    let jsFilename = entry.fileName;
+    let inputPath = path.join(this.workingDir, this.cacheDir, jsFilename);
+    const resolveAsyncComponents = async item => {
+      return {
+        ...item,
+        component: item.component.__asyncLoader ? (await item.component.__asyncLoader()).default : item.component,
+        children: item.children ? await Promise.all(item.children.map(resolveAsyncComponents)) : []
+      }
     }
+    this.routes = await Promise.all(require(inputPath).map(resolveAsyncComponents));
   }
 
   async renderComponent(vueComponent, data, mixin = {}, wrapperComponent) {

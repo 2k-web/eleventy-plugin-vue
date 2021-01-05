@@ -17,12 +17,15 @@ function getPermalink(permalink, data) {
 }
 
 function getPathToComponent(routes, component, path=[]) {
+  component = component.default || component;
+
   return routes.reduce((acc, route) => {
     if (acc.length) {
       return acc;
     }
+    const routeComponent = route.component.default || route.component;
 
-    if (route.component === component) {
+    if (routeComponent === component) {
       return [...path, route];
     }
 
@@ -105,6 +108,7 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
     getInstanceFromInputPath: function(inputPath) {
 
       function mergeParentPagination(routes, component, path=[]) {
+        component = component.default || component;
         const pathToComponent = getPathToComponent(routes, component);
 
         if (pathToComponent.length > 1) {
@@ -117,7 +121,7 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
                 ...origData,
                 permalink: function(data) {
                   return pathToComponent.reduce((acc, curr) => {
-                    const {permalink} = curr.component.data();
+                    const {permalink} = (curr.component.default || curr.component).data();
                     const obj = getPermalink(permalink, data);
                     if (obj && typeof obj === 'object' && obj.params && acc && typeof acc ==='object' && acc.params) {
                       return {
@@ -132,7 +136,7 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
                   }, {params: {}})
                 },
                 pagination: pathToComponent.reduce((acc, item) => {
-                  return acc.concat(item.component.data().pagination)
+                  return acc.concat((item.component.default || item.component).data().pagination)
                 }, [])
               }
             }
@@ -143,7 +147,7 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
 
       const component = eleventyVue.getComponent(inputPath);
 
-      return mergeParentPagination(eleventyVue.routes, component);
+      return mergeParentPagination(eleventyVue.routes, component.default || component);
     },
     init: async function() {
       eleventyVue.setInputDir(this.config.inputDir);
@@ -171,7 +175,8 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
           let chunkNames = new Map;
           output = await eleventyVue.writeRoutesBundle(routesBundle, chunkNames);
           eleventyVue.createVueComponentsFromMap(chunkNames);
-          eleventyVue.saveRoutesMapping(output);
+
+          await eleventyVue.saveRoutesMapping(output);
 
           //write app component
           let appBundle = await eleventyVue.getBundle(options.appPath);
@@ -186,11 +191,13 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
         // since `read: false` is set 11ty doesn't read file contents
         // so if str has a value, it's a permalink (which can be a string or a function)
         // currently Vue template syntax in permalink string is not supported.
-        const processVueRoute = (routeObj) => {
+        const processVueRoute = async (routeObj) => {
           let vueComponent = eleventyVue.getComponent(data.page.inputPath);
+          
           const routes = getPathToComponent(eleventyVue.routes, vueComponent);
 
           if (routes.length < 1) {
+            console.log(eleventyVue.routes, vueComponent, eleventyVue.routes[0].component, vueComponent.default === eleventyVue.routes[0].component)
             throw new Error(`Permalink is referencing a route that doesn't exist: ${JSON.stringify(routeObj)}`)
           }
           const route = routes[routes.length - 1];

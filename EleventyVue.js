@@ -318,6 +318,7 @@ class EleventyVue {
     await router.isReady();
 
     app.provide('eleventyData', data);
+
     app.mixin(mixin);
 
     if(!("page" in app.config.globalProperties)) {
@@ -332,16 +333,7 @@ class EleventyVue {
 
     //@TODO write data into separate JSON files instead, use runtime plugin to fetch in routing hook 
     //@TODO split data into separate JSON files for global vs page-specific data. Then we can fetch only the data that changes on routing events
-    return `${html}<script>window.__11TY_INITIAL_STATE__=${JSON.stringify(data, function( key, value) {
-      switch (key) {
-        case 'pkg':
-        case 'vue':
-        case 'collections':
-          return null;
-        default:
-          return value;
-      }
-    })}</script>`;
+    return html;
   }
 }
 

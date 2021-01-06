@@ -2,7 +2,7 @@ const path = require("path");
 const lodashMerge = require("lodash.merge");
 const { createRouter, createMemoryHistory } = require('vue-router');
 const { InlineCodeManager } = require("@11ty/eleventy-assets");
-
+const fs = require('fs').promises;
 const EleventyVue = require("./EleventyVue");
 const pkg = require("./package.json");
 
@@ -192,6 +192,7 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
         // since `read: false` is set 11ty doesn't read file contents
         // so if str has a value, it's a permalink (which can be a string or a function)
         // currently Vue template syntax in permalink string is not supported.
+        
         const processVueRoute = async (routeObj) => {
           let vueComponent = eleventyVue.getComponent(data.page.inputPath);
 
@@ -234,7 +235,24 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
           methods: this.config.javascriptFunctions,
         };
 
-        return eleventyVue.renderComponent(vueComponent, data, vueMixin, rootComponent);
+        const parsed = path.parse(data.page.outputPath);
+        const serializedData = JSON.stringify(data, function( key, value) {
+          switch (key) {
+            case 'pkg':
+            case 'vue':
+            case 'collections':
+              return null;
+            default:
+              return value;
+          }
+        });
+
+        const [html] = await Promise.all([
+          eleventyVue.renderComponent(vueComponent, data, vueMixin, rootComponent),
+          fs.writeFile(path.format({ ...parsed, base: 'state.json' }), serializedData)
+        ]);
+
+        return `${html}<script>window.__11TY_INITIAL_STATE__=${serializedData}</script>`;
       };
     }
   });

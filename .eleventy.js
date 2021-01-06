@@ -173,8 +173,9 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
         } else {
           routesBundle = await eleventyVue.getBundle(options.routesPath);
           let chunkNames = new Map;
-          output = await eleventyVue.writeRoutesBundle(routesBundle, chunkNames);
-          eleventyVue.createVueComponentsFromMap(chunkNames);
+          let chunkImports = new Map;
+          output = await eleventyVue.writeRoutesBundle(routesBundle, chunkNames, chunkImports);
+          eleventyVue.createVueComponentsFromChunkInfo(chunkNames, chunkImports);
 
           await eleventyVue.saveRoutesMapping(output);
 
@@ -193,11 +194,10 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
         // currently Vue template syntax in permalink string is not supported.
         const processVueRoute = async (routeObj) => {
           let vueComponent = eleventyVue.getComponent(data.page.inputPath);
-          
+
           const routes = getPathToComponent(eleventyVue.routes, vueComponent);
 
           if (routes.length < 1) {
-            console.log(eleventyVue.routes, vueComponent, eleventyVue.routes[0].component, vueComponent.default === eleventyVue.routes[0].component)
             throw new Error(`Permalink is referencing a route that doesn't exist: ${JSON.stringify(routeObj)}`)
           }
           const route = routes[routes.length - 1];

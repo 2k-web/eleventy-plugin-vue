@@ -129,14 +129,19 @@ class EleventyVue {
     return output;
   }
 
-  async writeRoutesBundle(bundle, chunkNames=new Map) {
+  async writeRoutesBundle(bundle, chunkNames=new Map, chunkImports=new Map) {
     var { output } = await bundle.write({
       ...this.rollupBundleOptions, 
-      manualChunks: (id, cordo) => {
-        
+      manualChunks: (id, chunkInfo) => {
         const match = /([^\/]*)\.vue$/.exec(id);
 
-        if (!match) return null;
+        if (!match) {
+          const jsMatch = /(.*)\?vue&type=script&lang.js$/.exec(id);
+          if (jsMatch) {
+            chunkImports.set(jsMatch[1], chunkInfo.getModuleInfo(id).importedIds);
+          }
+          return null;
+        }
         let chunkName = match[1];
         let ii = 0;
         while (chunkNames.has(chunkName)) {
@@ -158,12 +163,26 @@ class EleventyVue {
     return output;
   }
 
-  createVueComponentsFromMap(map) {
+  createVueComponentsFromChunkInfo(map, chunkImports) {
     this.componentsWriteCount = 0;
 
     map.forEach((sourceFile, chunkName) => {
       this.createVueComponent(sourceFile, `${chunkName}.js`);
     });
+
+    if (this.cssManager) {
+      map.forEach((sourceFile) => {
+        let isFullTemplateFile = !this.isIncludeFile(sourceFile);
+        if (isFullTemplateFile && chunkImports.has(sourceFile)) {
+          chunkImports.get(sourceFile).forEach((importFilename,k) => {
+            this.cssManager.addComponentRelationship(
+              this.getJavaScriptComponentFile(this.getLocalVueFilePath(sourceFile)), 
+              this.getJavaScriptComponentFile(this.getLocalVueFilePath(importFilename))
+            );
+          })
+        }
+      });
+    }    
   }
 
   createVueComponent(fullVuePath, jsFilename) {
@@ -177,19 +196,6 @@ class EleventyVue {
       this.cssManager.addComponentCode(jsFilename, css);
     }
 
-    //@TODO nested component styles are currently missing. Likely, we need to establish the relationship with the cssManager as the commented code below
-
-    let isFullTemplateFile = !this.isIncludeFile(fullVuePath);
-    if(isFullTemplateFile) {
-      if(this.cssManager) {
-        // If you import it, it will roll up the imported CSS in the CSS manager
-
-        // @TODO restore this bit
-        // for(let importFilename of entry.imports) {
-        //   this.cssManager.addComponentRelationship(jsFilename, importFilename);
-        // }
-      }
-    }
     this.componentsWriteCount++;
   }
 
@@ -238,7 +244,6 @@ class EleventyVue {
     if(!this.vueFileToCSSMap[localVuePath]) {
       this.vueFileToCSSMap[localVuePath] = [];
     }
-
     this.vueFileToCSSMap[localVuePath].push(cssText.trim());
   }
 
@@ -304,7 +309,6 @@ class EleventyVue {
     //   },
     // });
 
-    //@TODO currently, we don't have a great way of modeling deeply nested router views / child routes that will work with 11ty.
     const app = createSSRApp(wrapperComponent || vueComponent);
     const router = createRouter({ routes: this.routes, history: createMemoryHistory() });
 

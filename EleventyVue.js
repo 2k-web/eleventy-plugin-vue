@@ -317,7 +317,7 @@ class EleventyVue {
 
     await router.isReady();
 
-    app.provide('eleventyData', data);
+    app.config.globalProperties.$11ty = data;
 
     app.mixin(mixin);
 

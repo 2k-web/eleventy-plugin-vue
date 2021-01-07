@@ -5,6 +5,7 @@ const { InlineCodeManager } = require("@11ty/eleventy-assets");
 const fs = require('fs').promises;
 const EleventyVue = require("./EleventyVue");
 const pkg = require("./package.json");
+const makeDir = require('make-dir');
 
 function getPermalink(permalink, data) {
   if (!permalink) {
@@ -249,7 +250,8 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
 
         const [html] = await Promise.all([
           eleventyVue.renderComponent(vueComponent, data, vueMixin, rootComponent),
-          fs.writeFile(path.format({ ...parsed, base: 'state.json' }), serializedData)
+          makeDir(path.format({ ...parsed, base: null, ext: null, name: null }))
+            .then(() => fs.writeFile(path.format({ ...parsed, base: 'state.json' }), serializedData))
         ]);
 
         return `${html}<script>window.__11TY_INITIAL_STATE__=${serializedData}</script>`;

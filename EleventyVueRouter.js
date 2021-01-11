@@ -301,7 +301,7 @@ class EleventyVue {
     //   vueComponent.mixins = [];
     // }
 
-    // This is how 11ty data was being previously made available to components. Currently trying inject/provide instead, but we may want this back.
+    // This is how 11ty data was being previously made available to components. Currently trying global property instead, but we may want this back.
 
     // vueComponent.mixins.push({
     //   data: function() {
@@ -329,10 +329,9 @@ class EleventyVue {
         }
       })
     }
+
     const html = await renderToString(app);
 
-    //@TODO write data into separate JSON files instead, use runtime plugin to fetch in routing hook 
-    //@TODO split data into separate JSON files for global vs page-specific data. Then we can fetch only the data that changes on routing events
     return html;
   }
 }

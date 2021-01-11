@@ -3,7 +3,7 @@ const lodashMerge = require("lodash.merge");
 const { createRouter, createMemoryHistory } = require('vue-router');
 const { InlineCodeManager } = require("@11ty/eleventy-assets");
 const fs = require('fs').promises;
-const EleventyVue = require("./EleventyVue");
+const EleventyVue = require("./EleventyVueRouter");
 const pkg = require("./package.json");
 const makeDir = require('make-dir');
 
@@ -180,9 +180,9 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
 
           await eleventyVue.saveRoutesMapping(output);
 
-          //write app component
-          let appBundle = await eleventyVue.getBundle(options.appPath);
-          output = await eleventyVue.write(appBundle);
+          //write root component
+          let rootBundle = await eleventyVue.getBundle(options.rootComponentPath);
+          output = await eleventyVue.write(rootBundle);
           eleventyVue.createVueComponents(output);
         }        
       }
@@ -227,9 +227,12 @@ module.exports = function(eleventyConfig, configGlobalOptions = {}) {
         }
         
         let vueComponent = eleventyVue.getComponent(data.page.inputPath);
-        let rootComponent = eleventyVue.getComponent(options.appPath);
+        let rootComponent = eleventyVue.getComponent(options.rootComponentPath);
 
         let componentName = eleventyVue.getJavaScriptComponentFile(data.page.inputPath);
+        let rootComponentName = eleventyVue.getJavaScriptComponentFile(options.rootComponentPath);
+
+        cssManager.addComponentForUrl(rootComponentName, data.page.url);
         cssManager.addComponentForUrl(componentName, data.page.url);
 
         let vueMixin = {
